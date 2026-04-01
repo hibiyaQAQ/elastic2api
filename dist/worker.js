@@ -2738,10 +2738,9 @@ function anthropicToElastic(req, defaultMaxTokens) {
     result.tool_choice = convertToolChoice(req.tool_choice);
   }
   if (req.thinking?.type === "enabled") {
-    result.reasoning = {
-      enabled: true,
-      max_tokens: req.thinking.budget_tokens
-    };
+    const budget = req.thinking.budget_tokens;
+    const effort = budget >= 1e4 ? "xhigh" : budget >= 5e3 ? "high" : budget >= 1e3 ? "medium" : budget >= 200 ? "low" : "minimal";
+    result.reasoning = { effort };
   }
   return result;
 }

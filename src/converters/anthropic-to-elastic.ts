@@ -9,6 +9,7 @@ import type {
   ElasticMessage,
   ElasticTool,
   ElasticToolChoice,
+  ElasticReasoning,
 } from "../types/elastic";
 
 /**
@@ -63,12 +64,17 @@ export function anthropicToElastic(
     result.tool_choice = convertToolChoice(req.tool_choice);
   }
 
-  // thinking 配置 → reasoning
+  // Anthropic thinking → Elastic reasoning (effort 格式)
+  // 注意：Elastic 不支持 {enabled, max_tokens} 格式，只支持 {effort: "..."}
+  // 根据 budget_tokens 大小映射到对应的 effort 级别
   if (req.thinking?.type === "enabled") {
-    result.reasoning = {
-      enabled: true,
-      max_tokens: req.thinking.budget_tokens,
-    };
+    const budget = req.thinking.budget_tokens;
+    const effort: ElasticReasoning["effort"] =
+      budget >= 10000 ? "xhigh" :
+      budget >= 5000  ? "high"  :
+      budget >= 1000  ? "medium":
+      budget >= 200   ? "low"   : "minimal";
+    result.reasoning = { effort };
   }
 
   return result;
