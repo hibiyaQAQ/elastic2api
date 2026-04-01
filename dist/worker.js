@@ -2178,12 +2178,72 @@ var MemoryStore = class {
 };
 var globalMemoryStore = new MemoryStore();
 
+// src/utils/env.ts
+function getEnv(key) {
+  return globalThis?.process?.env?.[key];
+}
+
+// src/storage/upstash-store.ts
+var CONFIG_KEY2 = "proxy_config_v1";
+var UpstashStore = class {
+  url;
+  token;
+  constructor(url, token) {
+    this.url = url.replace(/\/$/, "");
+    this.token = token;
+  }
+  async request(command) {
+    const res = await fetch(this.url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(command)
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Upstash request failed ${res.status}: ${text}`);
+    }
+    const json = await res.json();
+    if (json.error) throw new Error(`Upstash error: ${json.error}`);
+    return json.result;
+  }
+  async getConfig() {
+    const raw2 = await this.request(["GET", CONFIG_KEY2]);
+    if (!raw2) return structuredClone(DEFAULT_CONFIG);
+    try {
+      return JSON.parse(raw2);
+    } catch {
+      return structuredClone(DEFAULT_CONFIG);
+    }
+  }
+  async setConfig(config) {
+    await this.request(["SET", CONFIG_KEY2, JSON.stringify(config)]);
+  }
+};
+function tryCreateUpstashStore() {
+  const upstashUrl = getEnv("UPSTASH_REDIS_REST_URL");
+  const upstashToken = getEnv("UPSTASH_REDIS_REST_TOKEN");
+  if (upstashUrl && upstashToken) {
+    return new UpstashStore(upstashUrl, upstashToken);
+  }
+  const kvUrl = getEnv("KV_REST_API_URL");
+  const kvToken = getEnv("KV_REST_API_TOKEN");
+  if (kvUrl && kvToken) {
+    return new UpstashStore(kvUrl, kvToken);
+  }
+  return null;
+}
+
 // src/storage/index.ts
 function createStore(c) {
   const env = c.env;
   if (env && "CONFIG_KV" in env && env["CONFIG_KV"]) {
     return new KVStore(env["CONFIG_KV"]);
   }
+  const upstash = tryCreateUpstashStore();
+  if (upstash) return upstash;
   return globalMemoryStore;
 }
 
@@ -2359,6 +2419,10 @@ var ElasticUpstreamError = class extends Error {
 };
 
 // src/utils/sse.ts
+var BOM = "\uFEFF";
+function stripBOM(s) {
+  return s.startsWith(BOM) ? s.slice(1) : s;
+}
 async function* parseSSE(stream) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -2368,15 +2432,19 @@ async function* parseSSE(stream) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split(/\n\n/);
-      buffer = blocks.pop() ?? "";
-      for (const block of blocks) {
+      const normalized = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const blocks = normalized.split(/\n\n/);
+      buffer = blocks[blocks.length - 1] ?? "";
+      for (let i = 0; i < blocks.length - 1; i++) {
+        const block = blocks[i];
+        if (!block) continue;
         const parsed = parseSSEBlock(block);
         if (parsed) yield parsed;
       }
     }
     if (buffer.trim()) {
-      const parsed = parseSSEBlock(buffer);
+      const normalized = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const parsed = parseSSEBlock(normalized);
       if (parsed) yield parsed;
     }
   } finally {
@@ -2384,18 +2452,20 @@ async function* parseSSE(stream) {
   }
 }
 function parseSSEBlock(block) {
-  const lines = block.split("\n");
+  const cleanBlock = stripBOM(block.trimStart().startsWith(BOM) ? block.trimStart() : block);
+  const lines = cleanBlock.split("\n");
   let event;
-  let data = "";
+  const dataLines = [];
   for (const line of lines) {
-    if (line.startsWith("event: ")) {
-      event = line.slice(7).trim();
-    } else if (line.startsWith("data: ")) {
-      data = line.slice(6);
-    } else if (line.startsWith("data:")) {
-      data = line.slice(5);
+    const clean = stripBOM(line).replace(/\r$/, "");
+    if (clean.startsWith("event:")) {
+      event = clean.slice(6).trim();
+    } else if (clean.startsWith("data:")) {
+      const val = clean.length > 5 && clean[5] === " " ? clean.slice(6) : clean.slice(5);
+      dataLines.push(val);
     }
   }
+  const data = dataLines.join("\n");
   if (!data) return null;
   return { event, data };
 }
@@ -2414,19 +2484,27 @@ data: ${data}
 // src/streaming/elastic-reader.ts
 async function* readElasticStream(responseBody) {
   for await (const { data } of parseSSE(responseBody)) {
-    if (data.trim() === "[DONE]") {
+    const trimmed = data.replace(/^\uFEFF/, "").trim();
+    if (trimmed === "[DONE]") {
       yield "DONE";
       return;
     }
-    if (!data.trim() || data.startsWith(":")) {
+    if (!trimmed || trimmed.startsWith(":")) {
       continue;
     }
+    let parsed;
     try {
-      const parsed = JSON.parse(data);
-      if (parsed !== null && typeof parsed === "object" && "chat_completion" in parsed) {
-        yield parsed;
-      }
+      parsed = JSON.parse(trimmed);
     } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== "object") continue;
+    if ("chat_completion" in parsed) {
+      yield parsed;
+      continue;
+    }
+    if ("choices" in parsed) {
+      yield { chat_completion: parsed };
       continue;
     }
   }
@@ -4408,7 +4486,16 @@ app.onError((err, c) => {
 });
 app.get("/health", (c) => {
   const env = c.env;
-  const storage = env && "CONFIG_KV" in env ? "kv" : "memory";
+  let storage = "memory";
+  if (env && "CONFIG_KV" in env && env["CONFIG_KV"]) {
+    storage = "cloudflare-kv";
+  } else if (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis?.process?.env?.["UPSTASH_REDIS_REST_URL"] || // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis?.process?.env?.["KV_REST_API_URL"]
+  ) {
+    storage = "upstash";
+  }
   return c.json({
     status: "ok",
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),

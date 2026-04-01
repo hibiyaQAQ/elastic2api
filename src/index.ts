@@ -46,9 +46,18 @@ app.onError((err, c) => {
 
 // ── 健康检查 ──
 app.get("/health", (c) => {
-  // 检测存储类型，帮助前端显示提示
   const env = c.env as Record<string, unknown> | undefined;
-  const storage = env && "CONFIG_KV" in env ? "kv" : "memory";
+  let storage = "memory";
+  if (env && "CONFIG_KV" in env && env["CONFIG_KV"]) {
+    storage = "cloudflare-kv";
+  } else if (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any)?.process?.env?.["UPSTASH_REDIS_REST_URL"] ||
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any)?.process?.env?.["KV_REST_API_URL"]
+  ) {
+    storage = "upstash";
+  }
 
   return c.json({
     status: "ok",
