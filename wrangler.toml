@@ -1,0 +1,32 @@
+name = "elastic-inference-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[build]
+command = "npm run build:worker"
+
+# ── KV Namespace 配置 ──
+# 需要先在 Cloudflare Dashboard 创建 KV Namespace，然后填入 ID
+# 创建命令: wrangler kv:namespace create "CONFIG_KV"
+# 预览命令: wrangler kv:namespace create "CONFIG_KV" --preview
+[[kv_namespaces]]
+binding = "CONFIG_KV"
+id = "YOUR_KV_NAMESPACE_ID"          # 替换为你的 KV Namespace ID
+preview_id = "YOUR_PREVIEW_KV_ID"   # 替换为你的预览 KV Namespace ID
+
+# ── 环境变量 ──
+# ADMIN_PASSWORD 可在 Cloudflare Dashboard 中设置为 Secret
+# 或在 wrangler.toml 中设置（不推荐用于生产环境）
+# [vars]
+# ADMIN_PASSWORD = "your-password"
+
+[env.production]
+name = "elastic-inference-proxy-prod"
+
+[[env.production.kv_namespaces]]
+binding = "CONFIG_KV"
+id = "YOUR_PROD_KV_NAMESPACE_ID"    # 替换为生产环境 KV ID
+
+[env.staging]
+name = "elastic-inference-proxy-staging"

@@ -1,0 +1,25 @@
+{
+  "name": "elastic-inference-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:vercel": "vercel dev",
+    "build:worker": "esbuild src/index.ts --bundle --outfile=dist/worker.js --format=esm --target=esnext --external:node:*",
+    "deploy:cf": "wrangler deploy",
+    "deploy:vercel": "vercel deploy --prod",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250401.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0",
+    "wrangler": "^4.0.0"
+  }
+}
