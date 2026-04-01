@@ -106,6 +106,9 @@ api.post("/endpoints", async (c) => {
     models: Array.isArray(body.models)
       ? body.models.map((m) => m.trim()).filter(Boolean)
       : [],
+    ...(typeof body.defaultMaxTokens === "number" && body.defaultMaxTokens > 0 && {
+      defaultMaxTokens: body.defaultMaxTokens,
+    }),
     enabled: body.enabled !== false,
     createdAt: new Date().toISOString(),
   };
@@ -162,6 +165,12 @@ api.put("/endpoints/:id", async (c) => {
       models: body.models.map((m) => m.trim()).filter(Boolean),
     }),
     ...(body.enabled !== undefined && { enabled: body.enabled }),
+    // defaultMaxTokens: 传 null/0 表示清除，传正整数表示设置，不传则保留原值
+    ...("defaultMaxTokens" in body
+      ? (typeof body.defaultMaxTokens === "number" && body.defaultMaxTokens > 0
+          ? { defaultMaxTokens: body.defaultMaxTokens }
+          : { defaultMaxTokens: undefined })
+      : {}),
     apiKey,
     baseUrl,
     id: existing.id,

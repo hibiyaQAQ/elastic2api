@@ -258,6 +258,16 @@ export function getAdminPage(): string {
           请求中的 <code class="bg-gray-100 px-1 rounded">model</code> 字段匹配这些名称时自动路由到此端点
         </p>
       </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">
+          默认 Max Tokens
+          <span class="text-gray-400 font-normal text-xs">（请求未指定时使用，留空由模型自行决定）</span>
+        </label>
+        <input id="epDefaultMaxTokens" type="number" min="1" max="1000000"
+          placeholder="如：8192"
+          class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm
+                 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50">
+      </div>
       <div class="flex items-center gap-2.5 pt-1">
         <input id="epEnabled" type="checkbox" checked
           class="w-4 h-4 text-blue-600 rounded accent-blue-600">
@@ -541,6 +551,7 @@ function openAddEndpointModal() {
   document.getElementById('epBaseUrl').value = '';
   document.getElementById('epInferenceId').value = '';
   document.getElementById('epModels').value = '';
+  document.getElementById('epDefaultMaxTokens').value = '';
   document.getElementById('epEnabled').checked = true;
   document.getElementById('epApiKeyHint').classList.add('hidden');
   document.getElementById('endpointModal').classList.add('active');
@@ -557,6 +568,7 @@ function editEndpoint(ep) {
   document.getElementById('epBaseUrl').value = ep.baseUrl;
   document.getElementById('epInferenceId').value = ep.inferenceId;
   document.getElementById('epModels').value = ep.models.join(', ');
+  document.getElementById('epDefaultMaxTokens').value = ep.defaultMaxTokens ? String(ep.defaultMaxTokens) : '';
   document.getElementById('epEnabled').checked = ep.enabled;
   document.getElementById('epApiKeyHint').classList.remove('hidden');
   document.getElementById('endpointModal').classList.add('active');
@@ -571,11 +583,15 @@ async function saveEndpoint() {
   const apiKey = document.getElementById('epApiKey').value.trim();
   const modelsStr = document.getElementById('epModels').value;
 
+  const defaultMaxTokensStr = document.getElementById('epDefaultMaxTokens').value.trim();
+  const defaultMaxTokens = defaultMaxTokensStr ? parseInt(defaultMaxTokensStr, 10) : undefined;
+
   const payload = {
     name: document.getElementById('epName').value.trim(),
     baseUrl: document.getElementById('epBaseUrl').value.trim(),
     inferenceId: document.getElementById('epInferenceId').value.trim(),
     models: modelsStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    ...(defaultMaxTokens && defaultMaxTokens > 0 && { defaultMaxTokens }),
     enabled: document.getElementById('epEnabled').checked,
   };
 

@@ -44,9 +44,9 @@ export function elasticToOpenAIStream(
                 ...(choice.delta.role !== undefined && { role: choice.delta.role }),
                 // content: null 也需要透传 (finish_reason chunk 中 content 为 null)
                 ...(choice.delta.content !== undefined && { content: choice.delta.content }),
-                // Elastic reasoning → OpenAI reasoning_content (兼容 o 系列)
-                ...(choice.delta.reasoning !== undefined && {
-                  reasoning_content: choice.delta.reasoning,
+                // Elastic reasoning (与 delta 同级) → OpenAI reasoning_content (兼容 o 系列)
+                ...(choice.reasoning !== undefined && {
+                  reasoning_content: choice.reasoning,
                 }),
                 // tool_calls 格式与 OpenAI 一致，直接透传
                 ...(choice.delta.tool_calls !== undefined && {
@@ -128,7 +128,7 @@ export async function elasticToOpenAIComplete(
       const c = getOrCreateChoice(choice.index);
 
       if (choice.delta.content) c.content += choice.delta.content;
-      if (choice.delta.reasoning) c.reasoning += choice.delta.reasoning;
+      if (choice.reasoning) c.reasoning += choice.reasoning;
       if (choice.finish_reason) c.finishReason = choice.finish_reason;
 
       if (choice.delta.tool_calls) {

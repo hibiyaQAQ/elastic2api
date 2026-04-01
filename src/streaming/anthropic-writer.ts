@@ -87,13 +87,14 @@ export function elasticToAnthropicStream(
           }
 
           for (const choice of cc.choices) {
-            const { delta, finish_reason } = choice;
+            const { delta, finish_reason, reasoning } = choice;
             if (finish_reason) {
               finalFinishReason = mapFinishReason(finish_reason);
             }
 
             // ── 处理思维链内容 → thinking block
-            if (delta.reasoning !== undefined && delta.reasoning !== "") {
+            // reasoning 与 delta 同级，不在 delta 内部
+            if (reasoning !== undefined && reasoning !== "") {
               if (thinkingBlockIndex === -1) {
                 thinkingBlockIndex = nextContentIndex++;
                 const startEvent: AnthropicContentBlockStartEvent = {
@@ -107,7 +108,7 @@ export function elasticToAnthropicStream(
               enqueue({
                 type: "content_block_delta",
                 index: thinkingBlockIndex,
-                delta: { type: "thinking_delta", thinking: delta.reasoning },
+                delta: { type: "thinking_delta", thinking: reasoning },
               });
             }
 

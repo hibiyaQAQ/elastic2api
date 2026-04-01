@@ -2329,17 +2329,20 @@ async function authMiddleware(c, next) {
   c.set("elastic", {
     apiKey: endpoint.apiKey,
     baseUrl: endpoint.baseUrl,
-    inferenceId: endpoint.inferenceId
+    inferenceId: endpoint.inferenceId,
+    ...endpoint.defaultMaxTokens !== void 0 && {
+      defaultMaxTokens: endpoint.defaultMaxTokens
+    }
   });
   await next();
 }
 
 // src/converters/openai-to-elastic.ts
-function openaiToElastic(req) {
+function openaiToElastic(req, defaultMaxTokens) {
   const result = {
     messages: req.messages.map(convertMessage)
   };
-  const maxTokens = req.max_completion_tokens ?? req.max_tokens;
+  const maxTokens = req.max_completion_tokens ?? req.max_tokens ?? defaultMaxTokens;
   if (maxTokens !== void 0) {
     result.max_completion_tokens = maxTokens;
   }
@@ -2535,9 +2538,9 @@ function elasticToOpenAIStream(elasticBody) {
                 ...choice.delta.role !== void 0 && { role: choice.delta.role },
                 // content: null 也需要透传 (finish_reason chunk 中 content 为 null)
                 ...choice.delta.content !== void 0 && { content: choice.delta.content },
-                // Elastic reasoning → OpenAI reasoning_content (兼容 o 系列)
-                ...choice.delta.reasoning !== void 0 && {
-                  reasoning_content: choice.delta.reasoning
+                // Elastic reasoning (与 delta 同级) → OpenAI reasoning_content (兼容 o 系列)
+                ...choice.reasoning !== void 0 && {
+                  reasoning_content: choice.reasoning
                 },
                 // tool_calls 格式与 OpenAI 一致，直接透传
                 ...choice.delta.tool_calls !== void 0 && {
@@ -2588,7 +2591,7 @@ async function elasticToOpenAIComplete(elasticBody) {
     for (const choice of cc.choices) {
       const c = getOrCreateChoice(choice.index);
       if (choice.delta.content) c.content += choice.delta.content;
-      if (choice.delta.reasoning) c.reasoning += choice.delta.reasoning;
+      if (choice.reasoning) c.reasoning += choice.reasoning;
       if (choice.finish_reason) c.finishReason = choice.finish_reason;
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
@@ -2670,7 +2673,7 @@ openaiRouter.post("/v1/chat/completions", async (c) => {
       400
     );
   }
-  const elasticBody = openaiToElastic(body);
+  const elasticBody = openaiToElastic(body, elastic.defaultMaxTokens);
   let elasticResp;
   try {
     elasticResp = await callElastic(elastic, elasticBody);
@@ -2709,7 +2712,7 @@ openaiRouter.post("/v1/chat/completions", async (c) => {
 });
 
 // src/converters/anthropic-to-elastic.ts
-function anthropicToElastic(req) {
+function anthropicToElastic(req, defaultMaxTokens) {
   const messages = [];
   if (req.system) {
     messages.push({ role: "system", content: req.system });
@@ -2720,7 +2723,8 @@ function anthropicToElastic(req) {
   }
   const result = {
     messages,
-    max_completion_tokens: req.max_tokens
+    // 优先使用请求中的值，否则用端点配置的默认值
+    max_completion_tokens: req.max_tokens ?? defaultMaxTokens
   };
   if (req.temperature !== void 0) result.temperature = req.temperature;
   if (req.top_p !== void 0) result.top_p = req.top_p;
@@ -2887,11 +2891,11 @@ function elasticToAnthropicStream(elasticBody) {
             });
           }
           for (const choice of cc.choices) {
-            const { delta, finish_reason } = choice;
+            const { delta, finish_reason, reasoning } = choice;
             if (finish_reason) {
               finalFinishReason = mapFinishReason(finish_reason);
             }
-            if (delta.reasoning !== void 0 && delta.reasoning !== "") {
+            if (reasoning !== void 0 && reasoning !== "") {
               if (thinkingBlockIndex === -1) {
                 thinkingBlockIndex = nextContentIndex++;
                 const startEvent = {
@@ -2905,7 +2909,7 @@ function elasticToAnthropicStream(elasticBody) {
               enqueue({
                 type: "content_block_delta",
                 index: thinkingBlockIndex,
-                delta: { type: "thinking_delta", thinking: delta.reasoning }
+                delta: { type: "thinking_delta", thinking: reasoning }
               });
             }
             if (delta.content !== void 0 && delta.content !== null && delta.content !== "") {
@@ -3072,7 +3076,7 @@ anthropicRouter.post("/v1/messages", async (c) => {
       400
     );
   }
-  const elasticBody = anthropicToElastic(body);
+  const elasticBody = anthropicToElastic(body, elastic.defaultMaxTokens);
   let elasticResp;
   try {
     elasticResp = await callElastic(elastic, elasticBody);
@@ -3142,7 +3146,7 @@ async function aggregateAnthropicResponse(body, model) {
         );
       }
       if (choice.delta.content) textContent += choice.delta.content;
-      if (choice.delta.reasoning) reasoningContent += choice.delta.reasoning;
+      if (choice.reasoning) reasoningContent += choice.reasoning;
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
           const tIdx = tc.index ?? 0;
@@ -3674,6 +3678,16 @@ function getAdminPage() {
           \u8BF7\u6C42\u4E2D\u7684 <code class="bg-gray-100 px-1 rounded">model</code> \u5B57\u6BB5\u5339\u914D\u8FD9\u4E9B\u540D\u79F0\u65F6\u81EA\u52A8\u8DEF\u7531\u5230\u6B64\u7AEF\u70B9
         </p>
       </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">
+          \u9ED8\u8BA4 Max Tokens
+          <span class="text-gray-400 font-normal text-xs">\uFF08\u8BF7\u6C42\u672A\u6307\u5B9A\u65F6\u4F7F\u7528\uFF0C\u7559\u7A7A\u7531\u6A21\u578B\u81EA\u884C\u51B3\u5B9A\uFF09</span>
+        </label>
+        <input id="epDefaultMaxTokens" type="number" min="1" max="1000000"
+          placeholder="\u5982\uFF1A8192"
+          class="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm
+                 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50">
+      </div>
       <div class="flex items-center gap-2.5 pt-1">
         <input id="epEnabled" type="checkbox" checked
           class="w-4 h-4 text-blue-600 rounded accent-blue-600">
@@ -3957,6 +3971,7 @@ function openAddEndpointModal() {
   document.getElementById('epBaseUrl').value = '';
   document.getElementById('epInferenceId').value = '';
   document.getElementById('epModels').value = '';
+  document.getElementById('epDefaultMaxTokens').value = '';
   document.getElementById('epEnabled').checked = true;
   document.getElementById('epApiKeyHint').classList.add('hidden');
   document.getElementById('endpointModal').classList.add('active');
@@ -3973,6 +3988,7 @@ function editEndpoint(ep) {
   document.getElementById('epBaseUrl').value = ep.baseUrl;
   document.getElementById('epInferenceId').value = ep.inferenceId;
   document.getElementById('epModels').value = ep.models.join(', ');
+  document.getElementById('epDefaultMaxTokens').value = ep.defaultMaxTokens ? String(ep.defaultMaxTokens) : '';
   document.getElementById('epEnabled').checked = ep.enabled;
   document.getElementById('epApiKeyHint').classList.remove('hidden');
   document.getElementById('endpointModal').classList.add('active');
@@ -3987,11 +4003,15 @@ async function saveEndpoint() {
   const apiKey = document.getElementById('epApiKey').value.trim();
   const modelsStr = document.getElementById('epModels').value;
 
+  const defaultMaxTokensStr = document.getElementById('epDefaultMaxTokens').value.trim();
+  const defaultMaxTokens = defaultMaxTokensStr ? parseInt(defaultMaxTokensStr, 10) : undefined;
+
   const payload = {
     name: document.getElementById('epName').value.trim(),
     baseUrl: document.getElementById('epBaseUrl').value.trim(),
     inferenceId: document.getElementById('epInferenceId').value.trim(),
     models: modelsStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean),
+    ...(defaultMaxTokens && defaultMaxTokens > 0 && { defaultMaxTokens }),
     enabled: document.getElementById('epEnabled').checked,
   };
 
@@ -4298,6 +4318,9 @@ api.post("/endpoints", async (c) => {
     baseUrl: body.baseUrl.trim().replace(/\/$/, ""),
     inferenceId: body.inferenceId.trim(),
     models: Array.isArray(body.models) ? body.models.map((m) => m.trim()).filter(Boolean) : [],
+    ...typeof body.defaultMaxTokens === "number" && body.defaultMaxTokens > 0 && {
+      defaultMaxTokens: body.defaultMaxTokens
+    },
     enabled: body.enabled !== false,
     createdAt: (/* @__PURE__ */ new Date()).toISOString()
   };
@@ -4336,6 +4359,8 @@ api.put("/endpoints/:id", async (c) => {
       models: body.models.map((m) => m.trim()).filter(Boolean)
     },
     ...body.enabled !== void 0 && { enabled: body.enabled },
+    // defaultMaxTokens: 传 null/0 表示清除，传正整数表示设置，不传则保留原值
+    ..."defaultMaxTokens" in body ? typeof body.defaultMaxTokens === "number" && body.defaultMaxTokens > 0 ? { defaultMaxTokens: body.defaultMaxTokens } : { defaultMaxTokens: void 0 } : {},
     apiKey,
     baseUrl,
     id: existing.id,

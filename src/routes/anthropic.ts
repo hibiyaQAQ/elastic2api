@@ -71,7 +71,7 @@ anthropicRouter.post("/v1/messages", async (c) => {
   }
 
   // 转换请求格式
-  const elasticBody = anthropicToElastic(body);
+  const elasticBody = anthropicToElastic(body, elastic.defaultMaxTokens);
 
   // 调用 Elastic
   let elasticResp: Response;
@@ -163,7 +163,7 @@ async function aggregateAnthropicResponse(
       }
 
       if (choice.delta.content) textContent += choice.delta.content;
-      if (choice.delta.reasoning) reasoningContent += choice.delta.reasoning;
+      if (choice.reasoning) reasoningContent += choice.reasoning;
 
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {

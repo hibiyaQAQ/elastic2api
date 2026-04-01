@@ -54,7 +54,7 @@ openaiRouter.post("/v1/chat/completions", async (c) => {
   }
 
   // 转换请求格式
-  const elasticBody = openaiToElastic(body);
+  const elasticBody = openaiToElastic(body, elastic.defaultMaxTokens);
 
   // 调用 Elastic
   let elasticResp: Response;

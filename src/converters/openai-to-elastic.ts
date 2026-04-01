@@ -15,13 +15,16 @@ import type {
  *   - tools / tool_choice 格式完全相同，直接透传
  *   - messages 格式基本相同，内容字段直接透传
  */
-export function openaiToElastic(req: OpenAIChatRequest): ElasticChatRequest {
+export function openaiToElastic(
+  req: OpenAIChatRequest,
+  defaultMaxTokens?: number
+): ElasticChatRequest {
   const result: ElasticChatRequest = {
     messages: req.messages.map(convertMessage),
   };
 
-  // max_tokens 或 max_completion_tokens → Elastic 的 max_completion_tokens
-  const maxTokens = req.max_completion_tokens ?? req.max_tokens;
+  // 优先使用请求中的值，否则用端点配置的默认值
+  const maxTokens = req.max_completion_tokens ?? req.max_tokens ?? defaultMaxTokens;
   if (maxTokens !== undefined) {
     result.max_completion_tokens = maxTokens;
   }

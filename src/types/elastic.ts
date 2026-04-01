@@ -98,8 +98,10 @@ export interface ElasticChoice {
     role?: ElasticRole;
     content?: string | null;
     tool_calls?: ElasticToolCall[];
-    reasoning?: string;
   };
+  /** 思考内容（reasoning 与 delta 同级，不在 delta 内部） */
+  reasoning?: string;
+  reasoning_details?: ElasticReasoningDetail[];
   finish_reason?: string | null;
 }
 

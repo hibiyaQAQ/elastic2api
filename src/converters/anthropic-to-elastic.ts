@@ -23,7 +23,10 @@ import type {
  *   - user 消息中的 tool_result block → 独立的 role:"tool" 消息
  *   - thinking block → reasoning 字段
  */
-export function anthropicToElastic(req: AnthropicRequest): ElasticChatRequest {
+export function anthropicToElastic(
+  req: AnthropicRequest,
+  defaultMaxTokens?: number
+): ElasticChatRequest {
   const messages: ElasticMessage[] = [];
 
   // 1. system 字段提取为第一条 system 消息
@@ -39,7 +42,8 @@ export function anthropicToElastic(req: AnthropicRequest): ElasticChatRequest {
 
   const result: ElasticChatRequest = {
     messages,
-    max_completion_tokens: req.max_tokens,
+    // 优先使用请求中的值，否则用端点配置的默认值
+    max_completion_tokens: req.max_tokens ?? defaultMaxTokens,
   };
 
   if (req.temperature !== undefined) result.temperature = req.temperature;

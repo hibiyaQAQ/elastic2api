@@ -15,6 +15,8 @@ export interface EndpointGroup {
   inferenceId: string;
   /** 该端点支持的模型名称列表，如 ["gpt-4o", "gpt-4-turbo"] */
   models: string[];
+  /** 请求未指定 max_tokens 时使用的默认值，不填则由 Elastic 端点决定 */
+  defaultMaxTokens?: number;
   enabled: boolean;
   createdAt: string;
 }

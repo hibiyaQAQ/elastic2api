@@ -8,6 +8,8 @@ export interface ElasticContext {
   apiKey: string;
   baseUrl: string;
   inferenceId: string;
+  /** 端点配置的默认 max_tokens，请求未指定时作为兜底 */
+  defaultMaxTokens?: number;
 }
 
 /**
@@ -121,6 +123,9 @@ export async function authMiddleware(c: Context, next: Next) {
     apiKey: endpoint.apiKey,
     baseUrl: endpoint.baseUrl,
     inferenceId: endpoint.inferenceId,
+    ...(endpoint.defaultMaxTokens !== undefined && {
+      defaultMaxTokens: endpoint.defaultMaxTokens,
+    }),
   } satisfies ElasticContext);
 
   await next();
