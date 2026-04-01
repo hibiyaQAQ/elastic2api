@@ -1,9 +1,12 @@
 /**
  * Vercel Edge Runtime 入口
- * Hono 应用直接导出 default，Vercel Edge 会自动调用
+ * 必须使用 hono/vercel 的 handle 包装，否则 Vercel 无法正确调用 Hono 应用
  */
-export { default } from "../src/index";
+import { handle } from "hono/vercel";
+import app from "../src/index";
 
 export const config = {
   runtime: "edge",
 };
+
+export default handle(app);
