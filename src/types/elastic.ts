@@ -5,14 +5,19 @@
 
 export type ElasticRole = "user" | "assistant" | "system" | "tool";
 
+/** 消息历史中的 tool_call（无 index） */
 export interface ElasticToolCall {
   id: string;
   type: "function";
-  index?: number;
   function: {
     name: string;
     arguments: string; // JSON string
   };
+}
+
+/** 流式 delta 中的 tool_call（有 index，用于标识哪个工具调用的增量） */
+export interface ElasticToolCallDelta extends ElasticToolCall {
+  index?: number;
 }
 
 export interface ElasticContentPartText {
@@ -29,7 +34,8 @@ export type ElasticContentPart = ElasticContentPartText | ElasticContentPartImag
 
 export interface ElasticMessage {
   role: ElasticRole;
-  content: string | ElasticContentPart[] | null;
+  /** tool_calls 存在时可省略 content */
+  content?: string | ElasticContentPart[] | null;
   tool_call_id?: string;
   tool_calls?: ElasticToolCall[];
   reasoning?: string;
@@ -97,7 +103,7 @@ export interface ElasticChoice {
   delta: {
     role?: ElasticRole;
     content?: string | null;
-    tool_calls?: ElasticToolCall[];
+    tool_calls?: ElasticToolCallDelta[];
   };
   /** 思考内容（reasoning 与 delta 同级，不在 delta 内部） */
   reasoning?: string;

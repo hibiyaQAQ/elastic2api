@@ -118,8 +118,6 @@ function convertAssistantBlocks(blocks: AnthropicContentBlock[]): ElasticMessage
   const toolCalls: NonNullable<ElasticMessage["tool_calls"]> = [];
   const reasoningParts: string[] = [];
 
-  let toolCallIndex = 0;
-
   for (const block of blocks) {
     switch (block.type) {
       case "text":
@@ -130,7 +128,6 @@ function convertAssistantBlocks(blocks: AnthropicContentBlock[]): ElasticMessage
         toolCalls.push({
           id: block.id,
           type: "function",
-          index: toolCallIndex++,
           function: {
             name: block.name,
             arguments: JSON.stringify(block.input),
@@ -148,9 +145,12 @@ function convertAssistantBlocks(blocks: AnthropicContentBlock[]): ElasticMessage
     }
   }
 
+  const text = textParts.join("");
   const message: ElasticMessage = {
     role: "assistant",
-    content: textParts.join("") || null,
+    // tool_calls 存在时省略 content（Elastic 不接受 null）
+    // 有文本内容时才设置 content
+    ...(text ? { content: text } : toolCalls.length === 0 ? { content: null } : {}),
   };
 
   if (toolCalls.length > 0) message.tool_calls = toolCalls;

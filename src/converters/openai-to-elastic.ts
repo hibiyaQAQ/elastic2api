@@ -37,9 +37,17 @@ export function openaiToElastic(
     result.stop = Array.isArray(req.stop) ? req.stop : [req.stop];
   }
 
-  // tools 格式与 Elastic 完全一致，直接透传
   if (req.tools && req.tools.length > 0) {
-    result.tools = req.tools;
+    result.tools = req.tools.map((tool) => ({
+      type: tool.type,
+      function: {
+        name: tool.function.name,
+        // 过滤空 description（Elastic/Anthropic 要求 description 长度 ≥ 1）
+        ...(tool.function.description ? { description: tool.function.description } : {}),
+        ...(tool.function.parameters !== undefined && { parameters: tool.function.parameters }),
+        ...(tool.function.strict !== undefined && { strict: tool.function.strict }),
+      },
+    }));
   }
 
   if (req.tool_choice !== undefined) {
@@ -55,13 +63,24 @@ export function openaiToElastic(
 }
 
 function convertMessage(msg: OpenAIChatRequest["messages"][number]): ElasticMessage {
+  const hasTool_calls = !!(msg.tool_calls && msg.tool_calls.length > 0);
+  const content = msg.content ?? null;
+
   const result: ElasticMessage = {
     role: msg.role,
-    content: msg.content ?? null,
+    // tool_calls 存在且 content 为 null 时省略 content 字段（Elastic 不接受 null）
+    ...(content !== null ? { content } : !hasTool_calls ? { content: null } : {}),
   };
 
   if (msg.tool_call_id) result.tool_call_id = msg.tool_call_id;
-  if (msg.tool_calls && msg.tool_calls.length > 0) result.tool_calls = msg.tool_calls;
+  if (hasTool_calls) {
+    // 剥掉 index 字段：index 只在流式 delta 里有效，放进消息历史 Elastic 会报 parse error
+    result.tool_calls = msg.tool_calls!.map(({ id, type, function: fn }) => ({
+      id,
+      type,
+      function: fn,
+    }));
+  }
 
   return result;
 }
