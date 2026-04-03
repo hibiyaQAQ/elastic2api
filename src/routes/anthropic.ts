@@ -138,8 +138,9 @@ async function aggregateAnthropicResponse(
 
   let textContent = "";
   let reasoningContent = "";
+  // 复合 key "${choice.index}:${tc.index}"，处理 Elastic 并行工具调用（多 choice）
   const toolCallMap = new Map<
-    number,
+    string,
     { id: string; name: string; arguments: string }
   >();
 
@@ -168,10 +169,11 @@ async function aggregateAnthropicResponse(
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
           const tIdx = tc.index ?? 0;
-          if (!toolCallMap.has(tIdx)) {
-            toolCallMap.set(tIdx, { id: tc.id, name: tc.function.name, arguments: "" });
+          const mapKey = `${choice.index}:${tIdx}`;
+          if (!toolCallMap.has(mapKey)) {
+            toolCallMap.set(mapKey, { id: tc.id, name: tc.function.name, arguments: "" });
           }
-          toolCallMap.get(tIdx)!.arguments += tc.function.arguments ?? "";
+          toolCallMap.get(mapKey)!.arguments += tc.function.arguments ?? "";
         }
       }
     }
@@ -189,7 +191,11 @@ async function aggregateAnthropicResponse(
   }
 
   if (toolCallMap.size > 0) {
-    const sorted = [...toolCallMap.entries()].sort(([a], [b]) => a - b);
+    const sorted = [...toolCallMap.entries()].sort(([a], [b]) => {
+      const [ac = 0, at = 0] = a.split(":").map(Number);
+      const [bc = 0, bt = 0] = b.split(":").map(Number);
+      return (ac - bc) || (at - bt);
+    });
     for (const [, tc] of sorted) {
       let input: Record<string, unknown> = {};
       try {

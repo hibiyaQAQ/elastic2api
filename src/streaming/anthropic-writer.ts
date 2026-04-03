@@ -54,8 +54,9 @@ export function elasticToAnthropicStream(
       let thinkingBlockIndex = -1;
       // 文本 block 是否已开启
       let textBlockIndex = -1;
-      // Elastic tool call index → Anthropic content block index
-      const toolIndexMap = new Map<number, number>();
+      // 复合 key "${choice.index}:${tc.index}" → Anthropic content block index
+      // 必须用复合 key，因为 Elastic 并行工具调用时每个 choice 都有独立的 tc.index=0
+      const toolIndexMap = new Map<string, number>();
 
       try {
         for await (const chunk of readElasticStream(elasticBody)) {
@@ -142,9 +143,11 @@ export function elasticToAnthropicStream(
             if (delta.tool_calls && delta.tool_calls.length > 0) {
               for (const tc of delta.tool_calls) {
                 const elasticToolIdx = tc.index ?? 0;
+                // 复合 key：Elastic 并行调用时每个 choice 各自的 tc.index 都从 0 开始
+                const mapKey = `${choice.index}:${elasticToolIdx}`;
 
                 // 首次出现此工具调用：开启新的 tool_use block
-                if (!toolIndexMap.has(elasticToolIdx)) {
+                if (!toolIndexMap.has(mapKey)) {
                   // 关闭 thinking block (如果还开着)
                   if (thinkingBlockIndex !== -1 && openBlocks.has(thinkingBlockIndex)) {
                     enqueue({ type: "content_block_stop", index: thinkingBlockIndex });
@@ -157,7 +160,7 @@ export function elasticToAnthropicStream(
                   }
 
                   const blockIdx = nextContentIndex++;
-                  toolIndexMap.set(elasticToolIdx, blockIdx);
+                  toolIndexMap.set(mapKey, blockIdx);
 
                   const startEvent: AnthropicContentBlockStartEvent = {
                     type: "content_block_start",
@@ -175,7 +178,7 @@ export function elasticToAnthropicStream(
 
                 // 追加工具参数 JSON 片段
                 if (tc.function.arguments) {
-                  const blockIdx = toolIndexMap.get(elasticToolIdx)!;
+                  const blockIdx = toolIndexMap.get(mapKey)!;
                   enqueue({
                     type: "content_block_delta",
                     index: blockIdx,
