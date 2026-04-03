@@ -31,8 +31,12 @@ export function anthropicToElastic(
   const messages: ElasticMessage[] = [];
 
   // 1. system 字段提取为第一条 system 消息
+  // Claude Code 会把 system 以数组形式发送（带 cache_control），需要提取纯文本
   if (req.system) {
-    messages.push({ role: "system", content: req.system });
+    const systemText = extractSystemText(req.system);
+    if (systemText) {
+      messages.push({ role: "system", content: systemText });
+    }
   }
 
   // 2. 转换 messages 数组
@@ -240,4 +244,19 @@ function convertToolChoice(tc: AnthropicToolChoice): ElasticToolChoice {
     case "tool":
       return { type: "function", function: { name: tc.name } };
   }
+}
+
+/**
+ * 从 system 字段提取纯文本
+ * Claude Code 等客户端会把 system 以数组形式发送，每个 block 带有 cache_control 等额外字段
+ * Elastic 只接受纯字符串，需要提取 text 部分并拼接
+ */
+function extractSystemText(
+  system: string | Array<{ type: string; text?: string; [key: string]: unknown }>
+): string {
+  if (typeof system === "string") return system;
+  return system
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n");
 }

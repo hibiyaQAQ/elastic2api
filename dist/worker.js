@@ -2715,7 +2715,10 @@ openaiRouter.post("/v1/chat/completions", async (c) => {
 function anthropicToElastic(req, defaultMaxTokens) {
   const messages = [];
   if (req.system) {
-    messages.push({ role: "system", content: req.system });
+    const systemText = extractSystemText(req.system);
+    if (systemText) {
+      messages.push({ role: "system", content: systemText });
+    }
   }
   for (const msg of req.messages) {
     const converted = convertAnthropicMessage(msg);
@@ -2846,6 +2849,10 @@ function convertToolChoice(tc) {
     case "tool":
       return { type: "function", function: { name: tc.name } };
   }
+}
+function extractSystemText(system) {
+  if (typeof system === "string") return system;
+  return system.filter((block) => block.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
 }
 
 // src/streaming/anthropic-writer.ts

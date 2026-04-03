@@ -77,7 +77,8 @@ export interface AnthropicRequest {
   model: string;
   messages: AnthropicMessage[];
   max_tokens: number;
-  system?: string;
+  /** 支持纯字符串或 Anthropic 的 content block 数组（Claude Code 会发数组格式，含 cache_control） */
+  system?: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
   temperature?: number;
   top_p?: number;
   stop_sequences?: string[];
