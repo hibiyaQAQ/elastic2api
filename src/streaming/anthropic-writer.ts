@@ -147,7 +147,8 @@ export function elasticToAnthropicStream(
                 const mapKey = `${choice.index}:${elasticToolIdx}`;
 
                 // 首次出现此工具调用：开启新的 tool_use block
-                if (!toolIndexMap.has(mapKey)) {
+                // 仅当 tc.id 和 tc.function?.name 都存在时才创建（Opus 的心跳 chunk 不含这些字段）
+                if (!toolIndexMap.has(mapKey) && tc.id && tc.function?.name) {
                   // 关闭 thinking block (如果还开着)
                   if (thinkingBlockIndex !== -1 && openBlocks.has(thinkingBlockIndex)) {
                     enqueue({ type: "content_block_stop", index: thinkingBlockIndex });
@@ -177,7 +178,8 @@ export function elasticToAnthropicStream(
                 }
 
                 // 追加工具参数 JSON 片段
-                if (tc.function.arguments) {
+                // Opus 有时发 {"index":0,"type":null} 不含 function 属性，需要安全访问
+                if (tc.function?.arguments && toolIndexMap.has(mapKey)) {
                   const blockIdx = toolIndexMap.get(mapKey)!;
                   enqueue({
                     type: "content_block_delta",

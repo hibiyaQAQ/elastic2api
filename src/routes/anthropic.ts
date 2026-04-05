@@ -170,10 +170,13 @@ async function aggregateAnthropicResponse(
         for (const tc of choice.delta.tool_calls) {
           const tIdx = tc.index ?? 0;
           const mapKey = `${choice.index}:${tIdx}`;
-          if (!toolCallMap.has(mapKey)) {
+          // Opus 的心跳 chunk 可能不含 function 属性：{"index":0,"type":null}
+          if (!toolCallMap.has(mapKey) && tc.id && tc.function?.name) {
             toolCallMap.set(mapKey, { id: tc.id, name: tc.function.name, arguments: "" });
           }
-          toolCallMap.get(mapKey)!.arguments += tc.function.arguments ?? "";
+          if (tc.function?.arguments && toolCallMap.has(mapKey)) {
+            toolCallMap.get(mapKey)!.arguments += tc.function.arguments;
+          }
         }
       }
     }

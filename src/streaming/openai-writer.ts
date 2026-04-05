@@ -134,15 +134,17 @@ export async function elasticToOpenAIComplete(
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
           const tIdx = tc.index ?? 0;
-          if (!c.toolCallMap.has(tIdx)) {
+          // Opus 心跳 chunk 可能不含 function：{"index":0,"type":null}
+          if (!c.toolCallMap.has(tIdx) && tc.id && tc.function?.name) {
             c.toolCallMap.set(tIdx, {
               id: tc.id,
               name: tc.function.name,
               arguments: "",
             });
           }
-          const existing = c.toolCallMap.get(tIdx)!;
-          existing.arguments += tc.function.arguments ?? "";
+          if (tc.function?.arguments && c.toolCallMap.has(tIdx)) {
+            c.toolCallMap.get(tIdx)!.arguments += tc.function.arguments;
+          }
         }
       }
     }
