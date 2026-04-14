@@ -2352,7 +2352,16 @@ function openaiToElastic(req, defaultMaxTokens) {
     result.stop = Array.isArray(req.stop) ? req.stop : [req.stop];
   }
   if (req.tools && req.tools.length > 0) {
-    result.tools = req.tools;
+    result.tools = req.tools.map((tool) => ({
+      type: tool.type,
+      function: {
+        name: tool.function.name,
+        // 过滤空 description（Elastic/Anthropic 要求 description 长度 ≥ 1）
+        ...tool.function.description ? { description: tool.function.description } : {},
+        ...tool.function.parameters !== void 0 && { parameters: tool.function.parameters },
+        ...tool.function.strict !== void 0 && { strict: tool.function.strict }
+      }
+    }));
   }
   if (req.tool_choice !== void 0) {
     result.tool_choice = req.tool_choice;
@@ -2363,12 +2372,21 @@ function openaiToElastic(req, defaultMaxTokens) {
   return result;
 }
 function convertMessage(msg) {
+  const hasTool_calls = !!(msg.tool_calls && msg.tool_calls.length > 0);
+  const content = msg.content ?? null;
   const result = {
     role: msg.role,
-    content: msg.content ?? null
+    // tool_calls 存在且 content 为 null 时省略 content 字段（Elastic 不接受 null）
+    ...content !== null ? { content } : !hasTool_calls ? { content: null } : {}
   };
   if (msg.tool_call_id) result.tool_call_id = msg.tool_call_id;
-  if (msg.tool_calls && msg.tool_calls.length > 0) result.tool_calls = msg.tool_calls;
+  if (hasTool_calls) {
+    result.tool_calls = msg.tool_calls.map(({ id, type, function: fn }) => ({
+      id,
+      type,
+      function: fn
+    }));
+  }
   return result;
 }
 function convertReasoning(r) {
@@ -2596,15 +2614,16 @@ async function elasticToOpenAIComplete(elasticBody) {
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
           const tIdx = tc.index ?? 0;
-          if (!c.toolCallMap.has(tIdx)) {
+          if (!c.toolCallMap.has(tIdx) && tc.id && tc.function?.name) {
             c.toolCallMap.set(tIdx, {
               id: tc.id,
               name: tc.function.name,
               arguments: ""
             });
           }
-          const existing = c.toolCallMap.get(tIdx);
-          existing.arguments += tc.function.arguments ?? "";
+          if (tc.function?.arguments && c.toolCallMap.has(tIdx)) {
+            c.toolCallMap.get(tIdx).arguments += tc.function.arguments;
+          }
         }
       }
     }
@@ -2764,7 +2783,6 @@ function convertAssistantBlocks(blocks) {
   const textParts = [];
   const toolCalls = [];
   const reasoningParts = [];
-  let toolCallIndex = 0;
   for (const block of blocks) {
     switch (block.type) {
       case "text":
@@ -2774,7 +2792,6 @@ function convertAssistantBlocks(blocks) {
         toolCalls.push({
           id: block.id,
           type: "function",
-          index: toolCallIndex++,
           function: {
             name: block.name,
             arguments: JSON.stringify(block.input)
@@ -2788,9 +2805,12 @@ function convertAssistantBlocks(blocks) {
         break;
     }
   }
+  const text = textParts.join("");
   const message = {
     role: "assistant",
-    content: textParts.join("") || null
+    // tool_calls 存在时省略 content（Elastic 不接受 null）
+    // 有文本内容时才设置 content
+    ...text ? { content: text } : toolCalls.length === 0 ? { content: null } : {}
   };
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
   if (reasoningParts.length > 0) message.reasoning = reasoningParts.join("\n");
@@ -2942,7 +2962,8 @@ function elasticToAnthropicStream(elasticBody) {
             if (delta.tool_calls && delta.tool_calls.length > 0) {
               for (const tc of delta.tool_calls) {
                 const elasticToolIdx = tc.index ?? 0;
-                if (!toolIndexMap.has(elasticToolIdx)) {
+                const mapKey = `${choice.index}:${elasticToolIdx}`;
+                if (!toolIndexMap.has(mapKey) && tc.id && tc.function?.name) {
                   if (thinkingBlockIndex !== -1 && openBlocks.has(thinkingBlockIndex)) {
                     enqueue({ type: "content_block_stop", index: thinkingBlockIndex });
                     openBlocks.delete(thinkingBlockIndex);
@@ -2952,7 +2973,7 @@ function elasticToAnthropicStream(elasticBody) {
                     openBlocks.delete(textBlockIndex);
                   }
                   const blockIdx = nextContentIndex++;
-                  toolIndexMap.set(elasticToolIdx, blockIdx);
+                  toolIndexMap.set(mapKey, blockIdx);
                   const startEvent = {
                     type: "content_block_start",
                     index: blockIdx,
@@ -2966,8 +2987,8 @@ function elasticToAnthropicStream(elasticBody) {
                   enqueue(startEvent);
                   openBlocks.set(blockIdx, "tool_use");
                 }
-                if (tc.function.arguments) {
-                  const blockIdx = toolIndexMap.get(elasticToolIdx);
+                if (tc.function?.arguments && toolIndexMap.has(mapKey)) {
+                  const blockIdx = toolIndexMap.get(mapKey);
                   enqueue({
                     type: "content_block_delta",
                     index: blockIdx,
@@ -3156,10 +3177,13 @@ async function aggregateAnthropicResponse(body, model) {
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
           const tIdx = tc.index ?? 0;
-          if (!toolCallMap.has(tIdx)) {
-            toolCallMap.set(tIdx, { id: tc.id, name: tc.function.name, arguments: "" });
+          const mapKey = `${choice.index}:${tIdx}`;
+          if (!toolCallMap.has(mapKey) && tc.id && tc.function?.name) {
+            toolCallMap.set(mapKey, { id: tc.id, name: tc.function.name, arguments: "" });
           }
-          toolCallMap.get(tIdx).arguments += tc.function.arguments ?? "";
+          if (tc.function?.arguments && toolCallMap.has(mapKey)) {
+            toolCallMap.get(mapKey).arguments += tc.function.arguments;
+          }
         }
       }
     }
@@ -3172,7 +3196,11 @@ async function aggregateAnthropicResponse(body, model) {
     content.push({ type: "text", text: textContent });
   }
   if (toolCallMap.size > 0) {
-    const sorted = [...toolCallMap.entries()].sort(([a], [b]) => a - b);
+    const sorted = [...toolCallMap.entries()].sort(([a], [b]) => {
+      const [ac = 0, at = 0] = a.split(":").map(Number);
+      const [bc = 0, bt = 0] = b.split(":").map(Number);
+      return ac - bc || at - bt;
+    });
     for (const [, tc] of sorted) {
       let input = {};
       try {
