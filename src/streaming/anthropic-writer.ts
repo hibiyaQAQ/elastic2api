@@ -142,6 +142,15 @@ export function elasticToAnthropicStream(
             // ── 处理工具调用 → tool_use block
             if (delta.tool_calls && delta.tool_calls.length > 0) {
               for (const tc of delta.tool_calls) {
+                // ── 临时调试 ──
+                console.error("[TC]", JSON.stringify({
+                  idx: tc.index,
+                  id: tc.id,
+                  name: tc.function?.name,
+                  args: tc.function?.arguments?.slice(0, 50),
+                  hasFunc: !!tc.function,
+                }));
+                // ── end debug ──
                 const elasticToolIdx = tc.index ?? 0;
                 // 复合 key：Elastic 并行调用时每个 choice 各自的 tc.index 都从 0 开始
                 const mapKey = `${choice.index}:${elasticToolIdx}`;
