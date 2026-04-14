@@ -18,20 +18,6 @@ export async function callElastic(
 ): Promise<Response> {
   const url = buildElasticUrl(ctx);
 
-  const bodyJson = JSON.stringify(body);
-
-  // ── 临时调试：检查发给 Elastic 的每条消息是否含有非法字段（确认后删除）──
-  for (let i = 0; i < body.messages.length; i++) {
-    const msg = body.messages[i];
-    const keys = Object.keys(msg);
-    const hasReasoning = "reasoning" in msg || "reasoning_details" in msg;
-    if (hasReasoning) {
-      console.error(`[DEBUG] messages[${i}] 含非法字段! keys=${keys.join(",")}`);
-      console.error(`[DEBUG] messages[${i}] 内容:`, JSON.stringify(msg).slice(0, 500));
-    }
-  }
-  // ── end debug ──
-
   let response: Response;
   try {
     response = await fetch(url, {
@@ -41,7 +27,7 @@ export async function callElastic(
         Authorization: `ApiKey ${ctx.apiKey}`,
         Accept: "text/event-stream",
       },
-      body: bodyJson,
+      body: JSON.stringify(body),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
