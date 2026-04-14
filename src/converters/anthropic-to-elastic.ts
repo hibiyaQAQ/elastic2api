@@ -111,12 +111,11 @@ function convertAnthropicMessage(msg: AnthropicMessage): ElasticMessage[] {
  * 转换 assistant 消息的内容块
  * text → content 字段
  * tool_use → tool_calls 数组
- * thinking → reasoning 字段
+ * thinking / redacted_thinking → 丢弃（Elastic 消息体不接受 reasoning 字段）
  */
 function convertAssistantBlocks(blocks: AnthropicContentBlock[]): ElasticMessage[] {
   const textParts: string[] = [];
   const toolCalls: NonNullable<ElasticMessage["tool_calls"]> = [];
-  const reasoningParts: string[] = [];
 
   for (const block of blocks) {
     switch (block.type) {
@@ -136,11 +135,8 @@ function convertAssistantBlocks(blocks: AnthropicContentBlock[]): ElasticMessage
         break;
 
       case "thinking":
-        reasoningParts.push(block.thinking);
-        break;
-
       case "redacted_thinking":
-        // 忽略加密的思维链
+        // 思维链仅作为推理过程记录，不回传给 Elastic（Elastic 不接受消息体内的 reasoning 字段）
         break;
     }
   }
@@ -148,13 +144,16 @@ function convertAssistantBlocks(blocks: AnthropicContentBlock[]): ElasticMessage
   const text = textParts.join("");
   const message: ElasticMessage = {
     role: "assistant",
-    // 有文本内容时才设置 content；
-    // tool_calls 存在或只有 thinking block 时省略 content（Elastic 不接受 null，Opus 遇到 null 会 400）
-    ...(text ? { content: text } : {}),
+    // 有文本内容时传文本；只有 thinking block（无 text 无 tool_calls）时传空字符串占位，
+    // 避免产生既无 content 也无 tool_calls 的非法消息（Elastic 遇到会报 parse error）
+    content: text || "",
   };
 
-  if (toolCalls.length > 0) message.tool_calls = toolCalls;
-  if (reasoningParts.length > 0) message.reasoning = reasoningParts.join("\n");
+  if (toolCalls.length > 0) {
+    message.tool_calls = toolCalls;
+    // tool_calls 存在时 content 为空字符串没有意义，省略以保持消息干净
+    if (!text) delete message.content;
+  }
 
   return [message];
 }
