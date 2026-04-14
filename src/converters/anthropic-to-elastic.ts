@@ -148,9 +148,9 @@ function convertAssistantBlocks(blocks: AnthropicContentBlock[]): ElasticMessage
   const text = textParts.join("");
   const message: ElasticMessage = {
     role: "assistant",
-    // tool_calls 存在时省略 content（Elastic 不接受 null）
-    // 有文本内容时才设置 content
-    ...(text ? { content: text } : toolCalls.length === 0 ? { content: null } : {}),
+    // 有文本内容时才设置 content；
+    // tool_calls 存在或只有 thinking block 时省略 content（Elastic 不接受 null，Opus 遇到 null 会 400）
+    ...(text ? { content: text } : {}),
   };
 
   if (toolCalls.length > 0) message.tool_calls = toolCalls;
